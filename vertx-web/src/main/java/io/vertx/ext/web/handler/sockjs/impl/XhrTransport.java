@@ -32,6 +32,8 @@
 
 package io.vertx.ext.web.handler.sockjs.impl;
 
+import static io.vertx.core.buffer.Buffer.buffer;
+
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.buffer.Buffer;
@@ -43,8 +45,6 @@ import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import io.vertx.ext.web.handler.sockjs.SockJSHandlerOptions;
 import io.vertx.ext.web.handler.sockjs.SockJSSocket;
-
-import static io.vertx.core.buffer.Buffer.buffer;
 
 /**
  * @author <a href="http://tfox.org">Tim Fox</a>
@@ -113,25 +113,37 @@ class XhrTransport extends BaseTransport {
   }
 
   private void handleSend(RoutingContext rc, SockJSSession session) {
-    rc.request().bodyHandler(buff -> {
-      String msgs = buff.toString();
-      if (msgs.equals("")) {
-        rc.response().setStatusCode(500);
-        rc.response().end("Payload expected.");
-        return;
-      }
-      if (!session.handleMessages(msgs)) {
-        sendInvalidJSON(rc.response());
-      } else {
-        rc.response().putHeader("Content-Type", "text/plain; charset=UTF-8");
-        setNoCacheHeaders(rc);
-        setJSESSIONID(options, rc);
-        setCORS(rc);
-        rc.response().setStatusCode(204);
-        rc.response().end();
-      }
-      if (log.isTraceEnabled()) log.trace("XHR send processed ok");
-    });
+    Buffer body = rc.getBody();
+    if (body != null) {
+      handleSendMessage(rc, session, body);
+    } else if (rc.request().isEnded()) {
+      log.error("Request ended before SockJS handler could read the body. Do you have an asynchronous request "
+          + "handler before the SockJS handler? If so, add a BodyHandler before the SockJS handler "
+          + "(see the docs).");
+      rc.response().setStatusCode(500).end();
+    } else {
+      rc.request().bodyHandler(buff -> handleSendMessage(rc, session, buff));
+    }
+  }
+
+  private void handleSendMessage(RoutingContext rc, SockJSSession session, Buffer body) {
+    String msgs = body.toString();
+    if (msgs.equals("")) {
+      rc.response().setStatusCode(500);
+      rc.response().end("Payload expected.");
+      return;
+    }
+    if (!session.handleMessages(msgs)) {
+      sendInvalidJSON(rc.response());
+    } else {
+      rc.response().putHeader("Content-Type", "text/plain; charset=UTF-8");
+      setNoCacheHeaders(rc);
+      setJSESSIONID(options, rc);
+      setCORS(rc);
+      rc.response().setStatusCode(204);
+      rc.response().end();
+    }
+    if (log.isTraceEnabled()) log.trace("XHR send processed ok");
   }
 
   private abstract class BaseXhrListener extends BaseListener {
